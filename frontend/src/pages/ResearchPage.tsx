@@ -10,6 +10,7 @@ import type {
   FactorTestParams,
   FactorTestResult,
   FactorTestStats,
+  RunManifest,
 } from "../api/generated/model";
 import {
   getFactorPortfolioQueryKey,
@@ -415,6 +416,7 @@ function TestResult({ data }: { data: FactorTestResult }) {
         <p className="mt-3 text-xs text-zinc-500">
           点一行看它的分组净值、IC 衰减；收益都不含交易成本，换手越高实际越打折。
         </p>
+        <RunNote manifest={data.manifest} />
       </Card>
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title={`${f.name}：各组净值`} className="lg:col-span-2">
@@ -451,6 +453,26 @@ function TestResult({ data }: { data: FactorTestResult }) {
     </>
   );
 }
+
+/** 运行清单：数据覆盖范围和已知偏差。结果必须在了解这些边界之后再读。 */
+function RunNote({ manifest }: { manifest: RunManifest }) {
+  return (
+    <p className="mt-3 text-xs text-zinc-500">
+      覆盖 {fmtInt(manifest.instruments)} 只股票、{fmtInt(manifest.observed_bars)} 根日线
+      {manifest.derived_versions && Object.keys(manifest.derived_versions).length > 0
+        ? ` · 派生数据：${Object.entries(manifest.derived_versions)
+            .map(([k, v]) => `${k} ${v.slice(0, 10)}`)
+            .join("，")}`
+        : null}
+      ；已知偏差：{BIAS_NOTES[manifest.bias] ?? manifest.bias}。
+    </p>
+  );
+}
+
+const BIAS_NOTES: Record<string, string> = {
+  "survivorship_biased:no_history_before_collection;current_industry;fundamentals_at_statutory_deadline":
+    "不含开始采集以前退市的股票（幸存者偏差），行业按当前归属，财报可用日按法定披露截止日推断",
+};
 
 function QuantileChart({ f }: { f: FactorTestStats }) {
   const lines: Line[] = useMemo(() => {
@@ -713,6 +735,7 @@ function PortfolioResultView({
         )}
         <p className="mt-3 text-xs text-zinc-500">只是按历史规律排出的名单，不是买卖建议；历史表现不代表未来。</p>
       </Card>
+      <RunNote manifest={data.manifest} />
     </>
   );
 }
