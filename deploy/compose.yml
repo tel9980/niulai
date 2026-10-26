@@ -1,4 +1,5 @@
-# niulai 的 Docker 部署：使用 CI 构建好的镜像，运行内置 PostgreSQL、niulai 和一键升级助手 upgrader 三个容器（upgrader 由 .env 的 COMPOSE_PROFILES 启用）。
+# niulai 的 Docker 部署（镜像来自 ci.yml 构建的 GHCR，可用 Dockge 直接部署）：
+# 使用 CI 构建好的镜像，运行内置 PostgreSQL、niulai 和一键升级助手 upgrader 三个容器（upgrader 由 .env 的 COMPOSE_PROFILES 启用）。
 # 对外只暴露 niulai 的一个 HTTP 端口，页面和 API 都在这个端口上。全部配置在同目录的 .env 中。
 #
 #   cp .env.example .env     # 默认值可以直接使用，按需修改端口等
@@ -56,7 +57,7 @@ services:
     logging: *logging
 
   niulai:
-    image: ${NIULAI_IMAGE:-ghcr.io/duoyuli/niulai:latest}
+    image: ${NIULAI_IMAGE:-ghcr.io/tel9980/niulai:latest}
     command: ["niulai", "serve"]
     # .env 中的 DATABASE_URL、NIULAI_* 等变量传给 niulai
     env_file: .env
@@ -70,7 +71,7 @@ services:
       postgres: { condition: service_healthy }
     # 对外只有这一个 HTTP 端口：页面 /，接口 /api/v1/*，健康检查 /api/v1/health、/api/v1/ready。
     # 打开网页先要登录（第一个管理员来自 .env 中的 NIULAI_ADMIN_USER、NIULAI_ADMIN_PASSWORD）；默认只监听本机
-    ports: ["${NIULAI_LISTEN_ADDR:-127.0.0.1}:${NIULAI_PORT:-8080}:8080"]
+    ports: ["${NIULAI_LISTEN_ADDR:-0.0.0.0}:${NIULAI_PORT:-2606}:8080"]
     restart: unless-stopped
     stop_grace_period: 2m      # 停机时等正在执行的任务结束
     # 常驻约 240 MiB；上限 1.2 GiB 覆盖全市场巡检、组合回测等峰值，日常远用不到
@@ -88,7 +89,7 @@ services:
   # 它挂载 Docker 的控制接口，能管理这台机器上的容器；niulai 没有这个权限，只能通过共享卷 upgrade 提交一个版本号。
   # .env 中的 COMPOSE_PROFILES=upgrader 启用它，删掉这一行即可关闭一键升级
   upgrader:
-    image: ${NIULAI_IMAGE:-ghcr.io/duoyuli/niulai:latest}
+    image: ${NIULAI_IMAGE:-ghcr.io/tel9980/niulai:latest}
     profiles: [upgrader]
     command: ["niulai", "upgrader"]
     user: root                 # 访问 Docker 的控制接口需要 root
