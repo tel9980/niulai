@@ -6895,6 +6895,28 @@
           }
         }
       },
+      "RateStatus": {
+        "type": "object",
+        "description": "供应商接口的当前限速。`current` 会因为遇到 429 自动降低、连续成功后再逐步回升，\n所以它可能小于配置的上限 `ceiling`；两者不相等说明正在被限流。",
+        "required": [
+          "current",
+          "ceiling"
+        ],
+        "properties": {
+          "ceiling": {
+            "type": "integer",
+            "format": "int32",
+            "description": "配置的上限（NIULAI_RATE_LIMIT_RPS）",
+            "minimum": 0
+          },
+          "current": {
+            "type": "integer",
+            "format": "int32",
+            "description": "当前生效的每秒请求数",
+            "minimum": 0
+          }
+        }
+      },
       "RecordItem": {
         "type": "object",
         "required": [
@@ -7715,7 +7737,8 @@
           "daily_state",
           "message",
           "gaps",
-          "failures"
+          "failures",
+          "rate"
         ],
         "properties": {
           "backfill": {
@@ -7764,6 +7787,10 @@
           "message": {
             "type": "string",
             "description": "一句话说明当前状态"
+          },
+          "rate": {
+            "$ref": "#/components/schemas/RateStatus",
+            "description": "当前限速；自适应降速后 current 会小于 ceiling"
           }
         }
       },

@@ -331,6 +331,15 @@ function Status({ h }: { h: SyncHealth }) {
             </div>
           </div>
         )}
+        {/* 限速会因为遇到 429 自动降低、连续成功后再回升；两者不等时说明正在被供应商限流 */}
+        <p className="text-xs text-zinc-400">
+          接口限速：每秒 {h.rate.current} 次
+          {h.rate.current < h.rate.ceiling && (
+            <span className="text-amber-600 dark:text-amber-500">
+              （上限 {h.rate.ceiling} 次，遇到限流已自动降低，恢复后会自己升回去）
+            </span>
+          )}
+        </p>
         {h.last_repair_at && (
           <p className="text-xs text-zinc-400">上次自动核对和补齐：{fmtDateTime(h.last_repair_at)}</p>
         )}

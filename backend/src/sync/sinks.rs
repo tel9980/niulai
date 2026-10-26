@@ -72,6 +72,9 @@ pub async fn apply_in_tx(
             .execute(&mut *conn)
             .await?
             .rows_affected() as usize,
+        ("mkt.stock_bar_1d", "a_share.bar_dump") => {
+            exec(conn, STOCK_BAR_DUMP, &data, run_id).await?
+        }
         ("mkt.stock_bar_1d", _) if mode != Some("snapshot") => {
             exec(conn, STOCK_BAR_HIST, &data, run_id).await?
         }
@@ -168,6 +171,31 @@ ON CONFLICT (cal_date) DO UPDATE SET source = 'api' WHERE ref.trading_day.source
 
 // 供应商偶尔返回明显错误的一行（例如 000066.SZ 2006-09-25 的成交额是 9.2e18，接近 64 位整数上限），
 // 写入会溢出、让整个窗口的几千行都失败。成交量或成交额达到 1e13 的行直接丢掉，不影响其他日子，见 docs/domains/market_data_rules.md#bad_rows
+
+// 全市场导出的日线（a_share.bar_dump）：一次下载覆盖约 10 年，与逐只拉的 STOCK_BAR_HIST 写同一张表，
+// UPSERT 幂等；source 记为 'dump'，便于在同步页和核对里区分来源。导出里没有成交额时留空。
+const STOCK_BAR_DUMP: &str = "
+INSERT INTO mkt.stock_bar_1d AS t (thscode, trade_date, open, high, low, close, volume, amount, source, run_id)
+SELECT e->>'thscode', (e->>'obs_date')::date,
+       coalesce((e->'p'->>'open_price')::numeric, (e->'p'->>'open')::numeric),
+       coalesce((e->'p'->>'high_price')::numeric, (e->'p'->>'high')::numeric),
+       coalesce((e->'p'->>'low_price')::numeric, (e->'p'->>'low')::numeric),
+       coalesce((e->'p'->>'close_price')::numeric, (e->'p'->>'close')::numeric),
+       round(coalesce((e->'p'->>'volume')::numeric, 0))::bigint,
+       coalesce((e->'p'->>'turnover')::numeric, (e->'p'->>'amount')::numeric),
+       'dump', $2
+FROM jsonb_array_elements($1) e
+WHERE coalesce((e->'p'->>'open_price')::numeric, (e->'p'->>'open')::numeric) IS NOT NULL
+  AND (e->>'obs_date') IS NOT NULL
+  AND coalesce((e->'p'->>'volume')::numeric, 0) < 1e13
+  AND coalesce((e->'p'->>'turnover')::numeric, (e->'p'->>'amount')::numeric, 0) < 1e13
+ON CONFLICT (thscode, trade_date) DO UPDATE
+  SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close,
+      volume = EXCLUDED.volume, amount = coalesce(EXCLUDED.amount, t.amount),
+      source = 'dump', run_id = EXCLUDED.run_id, updated_at = now()
+  WHERE (t.open, t.high, t.low, t.close, t.volume, t.amount)
+        IS DISTINCT FROM (EXCLUDED.open, EXCLUDED.high, EXCLUDED.low, EXCLUDED.close, EXCLUDED.volume, coalesce(EXCLUDED.amount, t.amount))";
+
 const STOCK_BAR_HIST: &str = "
 INSERT INTO mkt.stock_bar_1d AS t (thscode, trade_date, open, high, low, close, volume, amount, source, run_id)
 SELECT e->>'thscode', (e->>'obs_date')::date,

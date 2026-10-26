@@ -112,6 +112,7 @@ export * from './pendingRights';
 export * from './plannedDataset';
 export * from './positionInput';
 export * from './positionView';
+export * from './rateStatus';
 export * from './recordItem';
 export * from './recordItemPayload';
 export * from './repairSummary';

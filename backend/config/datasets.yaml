@@ -66,6 +66,26 @@ datasets:
 
   # ═══════════════════════════ A 股行情 ═══════════════════════════
 
+  - id: a_share.bar_dump
+    title: 个股日线（全市场导出）
+    category: 行情
+    summary: 全市场约 10 年未复权日线的 Parquet 导出，一次请求替掉逐只回补的 1.4 万次请求；首次回补走它
+    store_record: false
+    endpoint: /api/dump/market-dumps/daily-k/download-url
+    priority: P0
+    partition: once
+    records: parquet
+    key: "{thscode}|{time_ms:date}"           # 键形状与 a_share.bar_1d 一致，两者共用 mkt.stock_bar_1d
+    thscode: "{thscode}"
+    obs_date: "{time_ms:date}"
+    schedule: weekly
+    sink_mode: history
+    sink: [mkt.stock_bar_1d]
+    notes: >-
+      一次 GET 取预签名链接、再下载约 182 MB 的 Parquet（1,034 万行，约 10 年），替掉逐只拉的约 1.4 万次请求。
+      导出的日线与 REST 历史接口逐行一致（968 万行重叠、0 差异，见 docs/interfaces/hithink_api.md#market_dumps）。
+      只覆盖最近约 10 年：更早的年份仍由 a_share.bar_1d 按证券窗口补齐；两者写同一张表，UPSERT 幂等。
+
   - id: a_share.bar_1d
     title: 个股日线
     category: 行情

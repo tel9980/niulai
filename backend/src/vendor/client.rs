@@ -83,6 +83,9 @@ impl CallError {
 }
 
 // @project-doc docs/interfaces/hithink_api.md#error_handling
+/// 官方错误码 4001：被限速。命中时让限速器降速，其余可重试错误不调整速率。
+const THROTTLE_CODE: i64 = 4001;
+
 /// 官方错误码表：4001 限流、5001–5003 服务端或上游异常、3002 / 4040（导出文件）数据未就绪 → 可重试；其余不可重试。
 fn retryable_code(code: i64) -> bool {
     matches!(code, 3002 | 4001 | 4040 | 5001 | 5002 | 5003)
@@ -183,6 +186,7 @@ impl HithinkClient {
         })?;
         let latency_ms = elapsed(started);
         if status == 429 {
+            self.limiter.on_throttled();
             return Err(CallError::Retryable {
                 code: Some(4001),
                 http_status: Some(status),
@@ -203,18 +207,27 @@ impl HithinkClient {
             .unwrap_or_default()
             .to_string();
         match code {
-            Some(0) if status == 200 => Ok(CallResult {
-                http_status: status,
-                body,
-                bytes: raw.len(),
-                latency_ms,
-            }),
-            Some(c) if retryable_code(c) => Err(CallError::Retryable {
-                code,
-                http_status: Some(status),
-                message,
-                latency_ms,
-            }),
+            Some(0) if status == 200 => {
+                self.limiter.on_success();
+                Ok(CallResult {
+                    http_status: status,
+                    body,
+                    bytes: raw.len(),
+                    latency_ms,
+                })
+            }
+            Some(c) if retryable_code(c) => {
+                // 只有 4001 是真的被限速；5xx 那类服务端异常与限速无关，不调整速率
+                if c == THROTTLE_CODE {
+                    self.limiter.on_throttled();
+                }
+                Err(CallError::Retryable {
+                    code,
+                    http_status: Some(status),
+                    message,
+                    latency_ms,
+                })
+            }
             _ if status >= 500 => Err(CallError::Retryable {
                 code,
                 http_status: Some(status),

@@ -81,6 +81,16 @@ pub struct BackfillProgress {
     pub eta_hours: Option<f64>,
 }
 
+/// 供应商接口的当前限速。`current` 会因为遇到 429 自动降低、连续成功后再逐步回升，
+/// 所以它可能小于配置的上限 `ceiling`；两者不相等说明正在被限流。
+#[derive(Serialize, ToSchema, Debug, Clone, Copy)]
+pub struct RateStatus {
+    /// 当前生效的每秒请求数
+    pub current: u32,
+    /// 配置的上限（NIULAI_RATE_LIMIT_RPS）
+    pub ceiling: u32,
+}
+
 #[derive(Serialize, ToSchema, Debug)]
 pub struct SyncHealth {
     /// 最近一个应该已经有数据的交易日
@@ -93,6 +103,8 @@ pub struct SyncHealth {
     /// 失败后不再自动重试、之后也没有成功过的任务，按数据集分组
     pub failures: Vec<FailureGroup>,
     pub backfill: Option<BackfillProgress>,
+    /// 当前限速；自适应降速后 current 会小于 ceiling
+    pub rate: RateStatus,
     /// 最近一次兜底补偿的时间
     pub last_repair_at: Option<DateTime<Utc>>,
 }
@@ -350,12 +362,22 @@ async fn backfill(pool: &PgPool) -> anyhow::Result<Option<BackfillProgress>> {
     let (Some(total), Some(done)) = (total, done) else {
         return Ok(None);
     };
-    let per_hour: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM ops.api_call WHERE called_at > now() - interval '1 hour'",
+    // 同时看「最近一小时完成了多少任务」和「最近一小时打了多少次请求」，按两者的较小值估：
+    // 前者对一次请求干很多活的数据集（全市场导出、分页快照）更准，后者对单任务单请求的更准；
+    // 多任务共用一次请求时取 min 不会高估速度，避免 ETA 乐观到 0 小时。
+    let (tasks_per_hour, calls_per_hour): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM ops.task WHERE finished_at > now() - interval '1 hour'),
+                (SELECT count(*) FROM ops.api_call WHERE called_at > now() - interval '1 hour')",
     )
     .fetch_one(pool)
     .await?;
     let left = (total - done).max(0);
+    let per_hour = match (tasks_per_hour, calls_per_hour) {
+        (0, 0) => 0,
+        (t, 0) => t,
+        (0, c) => c,
+        (t, c) => t.min(c),
+    };
     Ok(Some(BackfillProgress {
         done,
         total,
@@ -411,6 +433,10 @@ pub async fn health(engine: &Engine) -> anyhow::Result<SyncHealth> {
         failures: failures(&engine.pool, &engine.registry).await?,
         gaps,
         backfill: backfill(&engine.pool).await?,
+        rate: RateStatus {
+            current: engine.client.limiter().current(),
+            ceiling: engine.client.limiter().ceiling(),
+        },
         last_repair_at,
     })
 }

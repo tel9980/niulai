@@ -11,7 +11,9 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 const DEFAULT_TTL_SECONDS: u64 = 15 * 60;
-const CACHE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
+// 本地 Redis 的正常响应在 1 毫秒以内；留 1 秒容忍容器网络抖动和瞬时排队，
+// 只有真的连不上才回退到数据库查询，避免抖动时整页都走数据库。
+const CACHE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct Cache {

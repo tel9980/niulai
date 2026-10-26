@@ -9,6 +9,7 @@ import type { BackfillProgress } from './backfillProgress';
 import type { DailyState } from './dailyState';
 import type { FailureGroup } from './failureGroup';
 import type { Gap } from './gap';
+import type { RateStatus } from './rateStatus';
 
 export interface SyncHealth {
   backfill?: BackfillProgress | null;
@@ -29,4 +30,6 @@ export interface SyncHealth {
   latest_trade_date?: string | null;
   /** 一句话说明当前状态 */
   message: string;
+  /** 当前限速；自适应降速后 current 会小于 ceiling */
+  rate: RateStatus;
 }

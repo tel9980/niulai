@@ -680,6 +680,8 @@ mod tests {
         assert_eq!(
             price,
             [
+                // 全市场导出和逐只历史都写 mkt.stock_bar_1d：前者覆盖最近约 10 年，后者补齐更早的年份
+                "a_share.bar_dump",
                 "a_share.bar_1d",
                 "a_share.snapshot",
                 "a_share.corp_action_dump"
