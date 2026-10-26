@@ -35,6 +35,7 @@ export * from './bar';
 export * from './barSeries';
 export * from './calibrateInput';
 export * from './checkResult';
+export * from './coverage';
 export * from './createdRun';
 export * from './createRun';
 export * from './currentAdviceParams';

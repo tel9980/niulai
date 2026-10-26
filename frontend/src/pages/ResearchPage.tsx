@@ -456,18 +456,32 @@ function TestResult({ data }: { data: FactorTestResult }) {
 
 /** 运行清单：数据覆盖范围和已知偏差。结果必须在了解这些边界之后再读。 */
 function RunNote({ manifest }: { manifest: RunManifest }) {
+  // 回补还没跑完时横截面用的是残缺样本，IC 和分组收益会失真，这里必须显眼地提示
+  const partial = manifest.coverage && manifest.coverage.ratio < COVERAGE_WARN_RATIO;
   return (
-    <p className="mt-3 text-xs text-zinc-500">
-      覆盖 {fmtInt(manifest.instruments)} 只股票、{fmtInt(manifest.observed_bars)} 根日线
-      {manifest.derived_versions && Object.keys(manifest.derived_versions).length > 0
-        ? ` · 派生数据：${Object.entries(manifest.derived_versions)
-            .map(([k, v]) => `${k} ${v.slice(0, 10)}`)
-            .join("，")}`
-        : null}
-      ；已知偏差：{BIAS_NOTES[manifest.bias] ?? manifest.bias}。
-    </p>
+    <>
+      {partial && manifest.coverage && (
+        <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+          数据还没补全：区间内全市场应有约 {fmtInt(manifest.coverage.expected)} 只，实际每个取样日中位数{" "}
+          {fmtInt(manifest.coverage.observed)} 只（
+          {(manifest.coverage.ratio * 100).toFixed(0)}%）。历史回补没跑完时结论会失真，仅供参考。
+        </p>
+      )}
+      <p className="mt-3 text-xs text-zinc-500">
+        覆盖 {fmtInt(manifest.instruments)} 只股票、{fmtInt(manifest.observed_bars)} 根日线
+        {manifest.derived_versions && Object.keys(manifest.derived_versions).length > 0
+          ? ` · 派生数据：${Object.entries(manifest.derived_versions)
+              .map(([k, v]) => `${k} ${v.slice(0, 10)}`)
+              .join("，")}`
+          : null}
+        ；已知偏差：{BIAS_NOTES[manifest.bias] ?? manifest.bias}。
+      </p>
+    </>
   );
 }
+
+/** 与后端 factor_lab::COVERAGE_WARN_RATIO 保持一致 */
+const COVERAGE_WARN_RATIO = 0.9;
 
 const BIAS_NOTES: Record<string, string> = {
   "survivorship_biased:no_history_before_collection;current_industry;fundamentals_at_statutory_deadline":

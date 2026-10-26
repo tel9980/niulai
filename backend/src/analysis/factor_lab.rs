@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{Datelike, NaiveDate};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use utoipa::ToSchema;
 
@@ -97,6 +97,9 @@ pub struct Panel {
     pub thin: Vec<bool>,
     /// 全市场等权日收益（前一天在股票池里的股票）
     pub market: Vec<f64>,
+    /// 区间内每个交易日应该有多少只股票有日线：取 `counts` 在取样区间内的最大值。
+    /// 不能取中位数——回补没跑完时所有日子一起偏少，中位数同样偏少，反而看不出缺数据
+    pub expected: u32,
 }
 
 pub struct Spec {
@@ -256,6 +259,7 @@ pub fn finish(
     sorted.sort_unstable();
     let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0);
     let thin: Vec<bool> = counts.iter().map(|c| *c * 2 < median).collect();
+    let expected = counts[start_idx..].iter().copied().max().unwrap_or(0);
     let mut sum = vec![0.0f64; calendar.len()];
     let mut n = vec![0u32; calendar.len()];
     for s in &stocks {
@@ -284,6 +288,7 @@ pub fn finish(
         evals,
         thin,
         market,
+        expected,
     };
     if let Some(fi) = panel.factors.iter().position(|f| *f == FactorId::IdioVol) {
         for k in 0..panel.evals.len() {
@@ -798,6 +803,46 @@ pub struct FactorTestOutcome {
     pub overfit: FactorOverfit,
     /// 区间内因同步缺口跳过的交易日
     pub thin_days: Vec<NaiveDate>,
+    /// 数据覆盖情况：区间内每个取样日应有多少只、实际有多少只
+    pub coverage: Coverage,
+}
+
+/// 数据覆盖情况。
+///
+/// `thin` 是逐日判定（当天有日线的股票数不到区间中位数一半就跳过），它假设「中位数」本身就代表
+/// 全市场。首次回补还没跑完时这个假设不成立：中位数也只有一半，于是每个交易日都「看起来正常」，
+/// 横截面却在用残缺样本做统计。所以这里单独算一个整体比值，让调用方能把「数据不全」和
+/// 「区间内真的没股票」区分开。
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct Coverage {
+    /// 区间内全市场应有的股票数：同期（±30 个交易日）出现过的证券数取最大值
+    pub expected: u32,
+    /// 各取样日实际参与横截面的股票数的中位数
+    pub observed: u32,
+    /// observed / expected，0 到 1
+    pub ratio: f64,
+    /// 取样日总数和因缺口被跳过的天数
+    pub eval_days: usize,
+    pub skipped_days: usize,
+}
+
+/// 覆盖度低于这个比例就认为回补还没跑完
+pub const COVERAGE_WARN_RATIO: f64 = 0.9;
+
+impl Coverage {
+    /// 覆盖不足时给用户看的一句话
+    pub fn warning(&self) -> Option<String> {
+        if self.ratio >= COVERAGE_WARN_RATIO {
+            return None;
+        }
+        Some(format!(
+            "数据还没补全：区间内全市场应有约 {} 只，实际每个取样日中位数 {} 只（{:.0}%）。\
+             历史回补还没跑完时，横截面用的是残缺样本，IC 和分组收益会失真，先看结论要谨慎。",
+            self.expected,
+            self.observed,
+            self.ratio * 100.0,
+        ))
+    }
 }
 
 fn mean_std(v: &[f64]) -> Option<(f64, f64)> {
@@ -1071,10 +1116,14 @@ pub fn evaluate(panel: &Panel, p: &TestParams) -> Option<FactorTestOutcome> {
         })
         .collect();
     let overfit = overfit(&stats, &days, panel);
+    let skipped_days = (panel.start_idx..panel.calendar.len())
+        .filter(|d| panel.thin[*d])
+        .count();
     let thin_days = (panel.start_idx..panel.calendar.len())
         .filter(|d| panel.thin[*d])
         .map(|d| panel.calendar[d])
         .collect();
+    let coverage = coverage(panel, skipped_days);
     Some(FactorTestOutcome {
         start: panel.calendar[panel.start_idx],
         end: *panel.calendar.last().expect("日历非空"),
@@ -1084,7 +1133,41 @@ pub fn evaluate(panel: &Panel, p: &TestParams) -> Option<FactorTestOutcome> {
         correlation,
         overfit,
         thin_days,
+        coverage,
     })
+}
+
+/// 统计区间内实际参与横截面的股票数：取各取样日股票数的中位数，与全市场应有数相比
+fn coverage(panel: &Panel, skipped_days: usize) -> Coverage {
+    let mut per_day: Vec<u32> = (panel.start_idx..panel.calendar.len())
+        .filter(|d| !panel.thin[*d])
+        .map(|d| {
+            panel
+                .stocks
+                .iter()
+                .filter(|s| {
+                    s.bars
+                        .binary_search_by_key(&(d as u16), |b| b.day)
+                        .is_ok_and(|i| s.bars[i].flags & IN_UNIVERSE != 0)
+                })
+                .count() as u32
+        })
+        .collect();
+    per_day.sort_unstable();
+    let observed = per_day.get(per_day.len() / 2).copied().unwrap_or(0);
+    let expected = panel.expected;
+    let ratio = if expected == 0 {
+        1.0
+    } else {
+        f64::from(observed) / f64::from(expected)
+    };
+    Coverage {
+        expected,
+        observed,
+        ratio: ratio.clamp(0.0, 1.0),
+        eval_days: per_day.len(),
+        skipped_days,
+    }
 }
 
 /// 用各候选的多空每期收益估计 PBO 和最好候选的 Deflated Sharpe。期数对齐到所有候选都有值的取样日
@@ -1554,6 +1637,47 @@ mod tests {
             neutralize: false,
             exclude_small_pct: 0.0,
         }
+    }
+
+    #[test]
+    fn coverage_counts_missing_days_as_incomplete() {
+        // 合成 4 个抽样日、每天 10 只股票：应该是满覆盖
+        let panel = synthetic(10, 6, 1, FactorId::Reversal, 1.0);
+        let mut per_day: Vec<u32> = (panel.start_idx..panel.calendar.len())
+            .filter(|d| !panel.thin[*d])
+            .map(|d| {
+                panel
+                    .stocks
+                    .iter()
+                    .filter(|s| s.bars.binary_search_by_key(&(d as u16), |b| b.day).is_ok())
+                    .count() as u32
+            })
+            .collect();
+        per_day.sort_unstable();
+        let observed = per_day.get(per_day.len() / 2).copied().unwrap_or(0);
+        assert_eq!(panel.expected, observed, "满覆盖时期望值和实测值应该一致");
+    }
+
+    #[test]
+    fn coverage_ratio_flags_partial_backfill() {
+        let c = Coverage {
+            expected: 5000,
+            observed: 2500,
+            ratio: 0.5,
+            eval_days: 100,
+            skipped_days: 0,
+        };
+        let w = c.warning().expect("一半的数据应该报警");
+        assert!(w.contains("50%"), "提示里要写出实际比例：{w}");
+
+        let ok = Coverage {
+            expected: 5000,
+            observed: 4800,
+            ratio: 0.96,
+            eval_days: 100,
+            skipped_days: 0,
+        };
+        assert!(ok.warning().is_none(), "覆盖 96% 不该报警");
     }
 
     #[test]

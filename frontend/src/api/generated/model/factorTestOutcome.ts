@@ -5,12 +5,15 @@
  * A 股数据工作台：行情、复权、多因子研究、账户调仓建议与数据同步
  * OpenAPI spec version: 0.1.0
  */
+import type { Coverage } from './coverage';
 import type { FactorOverfit } from './factorOverfit';
 import type { FactorTestStats } from './factorTestStats';
 
 export interface FactorTestOutcome {
   /** 因子之间的平均横截面秩相关，行列顺序同 `factors` */
   correlation: ((number | null)[])[];
+  /** 数据覆盖情况：区间内每个取样日应有多少只、实际有多少只 */
+  coverage: Coverage;
   end: string;
   factors: FactorTestStats[];
   /** @minimum 0 */

@@ -37,6 +37,9 @@ pub struct RunManifest {
     pub observed_bars: u64,
     /// 已知偏差：幸存者偏差、当前行业、财报按法定截止日
     pub bias: String,
+    /// 数据覆盖情况。只有因子检验能算出来，组合回测不填
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<crate::analysis::factor_lab::Coverage>,
 }
 
 pub fn definition_hash<T: Serialize>(value: &T) -> String {

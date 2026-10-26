@@ -5,6 +5,7 @@
  * A 股数据工作台：行情、复权、多因子研究、账户调仓建议与数据同步
  * OpenAPI spec version: 0.1.0
  */
+import type { Coverage } from './coverage';
 import type { RunManifestDerivedVersions } from './runManifestDerivedVersions';
 
 /**
@@ -13,6 +14,7 @@ import type { RunManifestDerivedVersions } from './runManifestDerivedVersions';
 export interface RunManifest {
   /** 已知偏差：幸存者偏差、当前行业、财报按法定截止日 */
   bias: string;
+  coverage?: Coverage | null;
   data_end: string;
   data_start: string;
   /** 配置的哈希：同一组配置算一次试验 */

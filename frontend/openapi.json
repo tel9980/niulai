@@ -4426,6 +4426,45 @@
           }
         }
       },
+      "Coverage": {
+        "type": "object",
+        "description": "数据覆盖情况。\n\n`thin` 是逐日判定（当天有日线的股票数不到区间中位数一半就跳过），它假设「中位数」本身就代表\n全市场。首次回补还没跑完时这个假设不成立：中位数也只有一半，于是每个交易日都「看起来正常」，\n横截面却在用残缺样本做统计。所以这里单独算一个整体比值，让调用方能把「数据不全」和\n「区间内真的没股票」区分开。",
+        "required": [
+          "expected",
+          "observed",
+          "ratio",
+          "eval_days",
+          "skipped_days"
+        ],
+        "properties": {
+          "eval_days": {
+            "type": "integer",
+            "description": "取样日总数和因缺口被跳过的天数",
+            "minimum": 0
+          },
+          "expected": {
+            "type": "integer",
+            "format": "int32",
+            "description": "区间内全市场应有的股票数：同期（±30 个交易日）出现过的证券数取最大值",
+            "minimum": 0
+          },
+          "observed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "各取样日实际参与横截面的股票数的中位数",
+            "minimum": 0
+          },
+          "ratio": {
+            "type": "number",
+            "format": "double",
+            "description": "observed / expected，0 到 1"
+          },
+          "skipped_days": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "CreateRun": {
         "type": "object",
         "required": [
@@ -5450,7 +5489,8 @@
           "factors",
           "correlation",
           "overfit",
-          "thin_days"
+          "thin_days",
+          "coverage"
         ],
         "properties": {
           "correlation": {
@@ -5466,6 +5506,10 @@
               }
             },
             "description": "因子之间的平均横截面秩相关，行列顺序同 `factors`"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage",
+            "description": "数据覆盖情况：区间内每个取样日应有多少只、实际有多少只"
           },
           "end": {
             "type": "string",
@@ -7291,6 +7335,17 @@
           "bias": {
             "type": "string",
             "description": "已知偏差：幸存者偏差、当前行业、财报按法定截止日"
+          },
+          "coverage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Coverage",
+                "description": "数据覆盖情况。只有因子检验能算出来，组合回测不填"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "data_end": {
             "type": "string",

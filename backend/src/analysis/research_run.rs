@@ -18,7 +18,8 @@ use utoipa::ToSchema;
 use super::compute::{self, Budget};
 use super::costs::Costs;
 use super::factor_lab::{
-    self, FactorPortfolioOutcome, FactorTestOutcome, PortfolioParams, Prep, Spec, TestParams,
+    self, Coverage, FactorPortfolioOutcome, FactorTestOutcome, PortfolioParams, Prep, Spec,
+    TestParams,
 };
 use super::factors::FactorId;
 use super::research::{self, RunManifest};
@@ -134,6 +135,7 @@ pub async fn factor_test(
             outcome.start,
             outcome.end,
             trials,
+            Some(outcome.coverage.clone()),
         )
         .await?;
         #[derive(Serialize)]
@@ -205,6 +207,8 @@ pub async fn factor_portfolio(
             outcome.summary.start,
             outcome.summary.end,
             trials,
+            // 组合回测的取样口径不同，暂不统计覆盖度
+            None,
         )
         .await?;
         record(
@@ -263,6 +267,7 @@ async fn manifest(
     start: NaiveDate,
     end: NaiveDate,
     trials: u64,
+    coverage: Option<Coverage>,
 ) -> sqlx::Result<RunManifest> {
     let versions: Vec<(String, String)> =
         sqlx::query_as("SELECT name, updated_at::text FROM ops.derived_version ORDER BY name")
@@ -285,6 +290,7 @@ async fn manifest(
         instruments: instruments.max(0) as u64,
         observed_bars: observed_bars.max(0) as u64,
         bias: BIAS.into(),
+        coverage,
     })
 }
 
